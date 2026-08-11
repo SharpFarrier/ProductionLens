@@ -533,15 +533,14 @@ function renderStock(){
       <td class="n">${v.packed||'—'}</td>
       <td class="n">${v.onOrder||'—'}</td>
       <td class="n"><b>${total}</b></td>
-      <td class="n small">${v.drr>0?fmt1(v.drr):'—'}</td>
     </tr>`;
   }).join('');
   $('#p-stock').innerHTML=`
     <div class="ph">Everything the planner is counting right now — pulled live from DispatchLens, per frame variant. Totals across all frames: <b>${T.raw}</b> raw · <b>${T.co}</b> coated · <b>${T.pk}</b> packed · <b>${T.oo}</b> on order.</div>
     <div style="overflow-x:auto"><table><thead><tr>
-      <th>Frame</th><th class="n">Raw</th><th class="n">Coated</th><th class="n">Packed</th><th class="n">On order</th><th class="n">Total</th><th class="n">Sold/day</th>
+      <th>Frame</th><th class="n">Raw</th><th class="n">Coated</th><th class="n">Packed</th><th class="n">On order</th><th class="n">Total</th>
     </tr></thead><tbody>${rows}</tbody>
-    <tfoot><tr style="border-top:2px solid var(--ink)"><td><b>All frames</b></td><td class="n"><b>${T.raw}</b></td><td class="n"><b>${T.co}</b></td><td class="n"><b>${T.pk}</b></td><td class="n"><b>${T.oo}</b></td><td class="n"><b>${T.raw+T.co+T.pk+T.oo}</b></td><td class="n"></td></tr></tfoot>
+    <tfoot><tr style="border-top:2px solid var(--ink)"><td><b>All frames</b></td><td class="n"><b>${T.raw}</b></td><td class="n"><b>${T.co}</b></td><td class="n"><b>${T.pk}</b></td><td class="n"><b>${T.oo}</b></td><td class="n"><b>${T.raw+T.co+T.pk+T.oo}</b></td></tr></tfoot>
     </table></div>
     <div class="ph" style="border-top:1px solid var(--line);border-bottom:none">Raw = frames inwarded (shipments + opening stock) minus pieces sent to coating. Coated & packed come straight from live piece and unit counts. Anything the planner couldn’t match to a frame is in the Health tab, not counted here.</div>`;
 }
