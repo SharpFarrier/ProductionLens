@@ -294,7 +294,7 @@ async function fetchAll(){
   for(const r of packed){
     const row=skuRow(r.sku); if(!row)continue;
     if(r.status==='stocked'){row.stock+=r.units}
-    else if(r.status==='packed'){row.stock+=r.units;row.packedOnly+=r.units}
+    else if(r.status==='packed'){row.packedOnly+=r.units}
   }
   for(const r of drr){
     const row=skuRow(r.sku); if(!row)continue;
