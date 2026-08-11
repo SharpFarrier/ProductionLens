@@ -23,6 +23,8 @@ main{max-width:1240px;margin:0 auto;padding:20px 22px}
 .btn.sm{padding:3px 9px;font-size:12px}
 .btn.ghost{border:none;background:none;color:var(--muted);padding:2px 6px}
 .btn.ghost:hover{color:var(--ink)}
+.btn.danger{color:var(--red);border-color:var(--red)}
+.btn.danger:hover{background:var(--red-bg)}
 .note{background:var(--amber-bg);border:1px solid #EAD9A0;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px}
 .mono{font-family:var(--mono)}.small{font-size:11.5px;color:var(--muted)}
 table{border-collapse:collapse;width:100%}
@@ -164,7 +166,7 @@ dialog .df{padding:12px 16px;border-top:1px solid var(--line);display:flex;justi
   <div class="tabs" id="tabs">
     <button class="on" data-p="incoming">Coming In <span class="cnt" id="cIn"></span></button>
     <button data-p="suggest">Give for Production <span class="cnt" id="cSg"></span></button>
-    <button data-p="queues">Queues</button>
+    <button data-p="queues">Pipeline</button>
     <button data-p="settings">Settings</button>
     <button data-p="health">Health <span class="cnt" id="cHl" style="display:none;background:var(--red);color:#fff"></span></button>
   </div>
@@ -312,6 +314,9 @@ async function dbInsertOrder(o){
   return error;
 }
 async function dbUpdateOrder(id,patch){const {error}=await sb.from('planner_orders').update(patch).eq('id',id);return error}
+async function dbDeleteOrder(id){const {error}=await sb.from('planner_orders').delete().eq('id',id);return error}
+async function dbWipeOpenOrders(){const {error}=await sb.from('planner_orders').delete().in('status',['queued','in_progress']);return error}
+async function dbInsertOrdersBulk(rows){const {error}=await sb.from('planner_orders').insert(rows);return error}
 async function dbSaveRate(id,patch){const {error}=await sb.from('planner_rates').update(patch).eq('id',id);return error}
 async function dbSaveSetting(key,value){const {error}=await sb.from('planner_settings').upsert({key,value,updated_at:new Date().toISOString()});return error}
 
@@ -524,17 +529,66 @@ function renderSuggest(){
     </div>`).join('')).join(''):'<div class="drow"><div class="w"><div class="m">Nothing to suggest — chain covers demand.</div></div></div>');
 }
 
-/* ---------- Queues (manage) ---------- */
+/* ---------- Pipeline (manage) ---------- */
 function renderQueues(){
-  $('#p-queues').innerHTML='<div class="ph">Each manufacturer runs top-to-bottom, one order at a time. Reorder to shift every arrival date.</div><div class="queues">'+
+  $('#p-queues').innerHTML='<div class="ph">This is your live manufacturer pipeline — the one thing DispatchLens doesn’t hold. Add today’s real orders, reorder them, mark deliveries. Each manufacturer runs top-to-bottom, one at a time.</div>'+
+   '<div style="padding:12px 18px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)">'+
+     '<button class="btn pri" id="q_add">+ Add order</button>'+
+     '<button class="btn" id="q_bulk">Bulk paste</button>'+
+     '<button class="btn danger" id="q_wipe" style="margin-left:auto">Wipe pipeline</button>'+
+   '</div>'+
+   '<div class="queues">'+
    Object.values(M.queues).map(q=>`
     <div class="qcol"><div class="qch"><b>${esc(q.mfr)}</b><span class="small">${q.busyUntil>0?'busy '+fmt1(q.busyUntil)+'d':'free'}</span>
       <button class="btn sm" data-neworder="${esc(q.mfr)}">+ Order</button></div>
       ${q.orders.map((o,i)=>`<div class="qitem"><span class="pos">${o.status==='in_progress'?'▶':'#'+(i+1)}</span>
         <div class="w"><b>${esc(o.frame)} ${esc(o.size)}</b> <span class="small mono">${o.remaining} pcs</span><div class="m small">${splitTxt(o.qty_metal,o.qty_mattress)} · ETA ${day(o.etaDay)}</div></div>
         <button class="btn sm ghost" data-qmove="${o.id}|up">↑</button><button class="btn sm ghost" data-qmove="${o.id}|down">↓</button>
-      </div>`).join('')||'<div class="qitem"><div class="m small">empty</div></div>'}
+        <button class="btn sm ghost" data-editord="${o.id}">✎</button>
+        <button class="btn sm ghost" data-delord="${o.id}" title="delete" style="color:var(--red)">✕</button>
+      </div>`).join('')||'<div class="qitem"><div class="m small">empty — no orders with this manufacturer</div></div>'}
     </div>`).join('')+'</div>';
+  $('#q_add').onclick=()=>orderDialog(null);
+  $('#q_bulk').onclick=bulkDialog;
+  $('#q_wipe').onclick=wipeDialog;
+}
+function wipeDialog(){
+  $('#dlgTitle').textContent='Wipe the whole pipeline?';
+  $('#dlgBody').innerHTML=`<div class="m" style="font-size:13.5px;line-height:1.5">This deletes <b>every open order</b> (queued + in progress) for all manufacturers, so you can re-enter today’s real pipeline from scratch. Delivered/arrived history is untouched. This can’t be undone.</div>`;
+  $('#dlgFoot').innerHTML=`<button class="btn" id="dCancel">Cancel</button><button class="btn danger" id="dWipe">Wipe pipeline</button>`;
+  const dlg=$('#dlg');dlg.showModal();
+  $('#dCancel').onclick=()=>dlg.close();
+  $('#dWipe').onclick=async()=>{const err=await dbWipeOpenOrders();if(err)alert(err.message);else{dlg.close();switchTab('queues');reload()}};
+}
+function bulkDialog(){
+  $('#dlgTitle').textContent='Bulk paste orders';
+  $('#dlgBody').innerHTML=`<div class="m small" style="margin-bottom:8px">One order per line. Format:<br><span class="mono">Manufacturer, Frame, Size, metalQty, mattressQty, status</span><br>status = <span class="mono">progress</span> or <span class="mono">queued</span> (optional, defaults queued). Order within each manufacturer = queue order.</div>
+   <textarea id="f_bulk" rows="8" style="width:100%;font-family:var(--mono);font-size:12.5px;padding:8px" placeholder="Bunty, Round, 3ft, 50, 50, progress
+Bunty, Metal, 2.5ft, 120, 0, queued
+Mahinder, Element, 4ft, 70, 70, queued"></textarea>
+   <div id="bulkErr" class="err" style="color:var(--red);font-size:12px;min-height:14px"></div>`;
+  $('#dlgFoot').innerHTML=`<button class="btn" id="dCancel">Cancel</button><button class="btn pri" id="dSave">Add all</button>`;
+  const dlg=$('#dlg');dlg.showModal();
+  $('#dCancel').onclick=()=>dlg.close();
+  $('#dSave').onclick=async()=>{
+    const lines=$('#f_bulk').value.split('\n').map(l=>l.trim()).filter(Boolean);
+    const rows=[],bad=[];const posByMfr={};
+    for(const q of Object.values(M.queues))posByMfr[q.mfr]=Math.max(-1,...D.ORDERS.filter(o=>o.mfr===q.mfr).map(o=>o.queue_pos));
+    for(const line of lines){
+      const p=line.split(',').map(x=>x.trim());
+      if(p.length<5){bad.push(line);continue}
+      const [mfr,frame,size,m,w,st]=p;
+      if(!D.P.mfrs[mfr]){bad.push(line+'  (unknown manufacturer)');continue}
+      if(!BED_FRAMES.includes(frame)){bad.push(line+'  (unknown frame)');continue}
+      if(!SIZES.includes(size)){bad.push(line+'  (bad size)');continue}
+      const status=/prog/i.test(st||'')?'in_progress':'queued';
+      posByMfr[mfr]=(posByMfr[mfr]??-1)+1;
+      rows.push({mfr,frame,size,qty_metal:Number(m)||0,qty_mattress:Number(w)||0,status,queue_pos:posByMfr[mfr],given_date:new Date().toISOString().slice(0,10)});
+    }
+    if(bad.length){$('#bulkErr').innerHTML='Skipped: '+bad.map(esc).join(' · ');if(!rows.length)return}
+    const err=await dbInsertOrdersBulk(rows);
+    if(err)$('#bulkErr').textContent=err.message;else{dlg.close();switchTab('queues');reload()}
+  };
 }
 
 /* ---------- Settings ---------- */
@@ -642,6 +696,8 @@ document.body.addEventListener('click',e=>{
   if(nw){orderDialog(null,nw);return}
   const mv=e.target.closest('[data-qmove]')?.dataset.qmove;
   if(mv){const [id,dir]=mv.split('|');moveOrder(id,dir);return}
+  const dl=e.target.closest('[data-delord]')?.dataset.delord;
+  if(dl){const o=D.ORDERS.find(x=>x.id===dl);if(o&&confirm(`Delete ${o.frame} ${o.size} (${o.mfr})?`)){dbDeleteOrder(dl).then(err=>err?alert(err.message):reload())}return}
   const sr=e.target.closest('[data-saverate]')?.dataset.saverate;
   if(sr){(async()=>{
     const err=await dbSaveRate(sr,{batch_qty:Number($(`[data-rq="${sr}"]`).value)||1,batch_days:Number($(`[data-rd="${sr}"]`).value)||1});
