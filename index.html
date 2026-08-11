@@ -166,11 +166,13 @@ dialog .df{padding:12px 16px;border-top:1px solid var(--line);display:flex;justi
   <div class="tabs" id="tabs">
     <button class="on" data-p="incoming">Coming In <span class="cnt" id="cIn"></span></button>
     <button data-p="suggest">Give for Production <span class="cnt" id="cSg"></span></button>
+    <button data-p="stock">Stock</button>
     <button data-p="queues">Pipeline</button>
     <button data-p="settings">Settings</button>
     <button data-p="health">Health <span class="cnt" id="cHl" style="display:none;background:var(--red);color:#fff"></span></button>
   </div>
   <div class="panel on" id="p-incoming"></div>
+  <div class="panel" id="p-stock"></div>
   <div class="panel" id="p-suggest"></div>
   <div class="panel" id="p-queues"></div>
   <div class="panel" id="p-settings"></div>
@@ -441,7 +443,7 @@ async function reload(){
   BUSY=false;
 }
 
-function renderAll(){renderLine();renderCal();renderIncoming();renderSuggest();renderQueues();renderSettings();renderHealth();
+function renderAll(){renderLine();renderCal();renderIncoming();renderStock();renderSuggest();renderQueues();renderSettings();renderHealth();
   $('#cIn').textContent=D.ORDERS.length;$('#cSg').textContent=M.recs.length;
   const hu=D.health.unmappedSkus.length+D.health.rawDrift.length;
   $('#cHl').textContent=hu;$('#cHl').style.display=hu?'inline-block':'none';
@@ -464,9 +466,9 @@ function renderLine(){
   $('#mfrCol').innerHTML=Object.keys(D.P.mfrs).map(mfrHtml).join('');
   const stn=(go,label,big,sub,g,gc)=>`<div class="station" data-go="${go}"><div class="nm">${label}</div><div class="bg">${big}</div><div class="st">${sub}</div>${g!=null?`<div class="gauge"><i class="${gc}" style="width:${g}%"></i></div>`:''}</div><div class="conn"></div>`;
   $('#chainRow').innerHTML=
-    stn('health','Raw rack',T.raw,V.filter(v=>v.raw>0).length+' frame types',Math.min(100,T.raw/8),'g-ok')+
-    stn('health','Coated rack',T.co,V.filter(v=>v.coated>0).length+' types ready',Math.min(100,T.co/6),'g-warn')+
-    stn('health','Packed stock',T.pk,'~'+cover.toFixed(0)+' days of orders',Math.min(100,cover*10),cover<6?'g-bad':'g-warn')+
+    stn('stock','Raw rack',T.raw,V.filter(v=>v.raw>0).length+' frame types',Math.min(100,T.raw/8),'g-ok')+
+    stn('stock','Coated rack',T.co,V.filter(v=>v.coated>0).length+' types ready',Math.min(100,T.co/6),'g-warn')+
+    stn('stock','Packed stock',T.pk,'~'+cover.toFixed(0)+' days of orders',Math.min(100,cover*10),cover<6?'g-bad':'g-warn')+
     `<div class="station stn-out"><div class="nm">Dispatch</div><div class="bg">${Math.round(T.drr)}<span style="font-size:13px">/day</span></div><div class="st">30-day run rate</div></div>`;
 }
 
@@ -517,7 +519,32 @@ function renderIncoming(){
     </div>`).join(''):'<div class="drow"><div class="w"><div class="m">Pipeline is empty.</div></div></div>');
 }
 
-/* ---------- Suggestions ---------- */
+/* ---------- Stock (what the planner is counting) ---------- */
+function renderStock(){
+  const V=Object.values(M.variants).filter(v=>v.drr>0||v.packed+v.coated+v.raw+v.onOrder>0)
+    .sort((a,b)=>(b.packed+b.coated+b.raw+b.onOrder)-(a.packed+a.coated+a.raw+a.onOrder));
+  const T={raw:sum(V,v=>v.raw),co:sum(V,v=>v.coated),pk:sum(V,v=>v.packed),oo:sum(V,v=>v.onOrder)};
+  const rows=V.map(v=>{
+    const total=v.packed+v.coated+v.raw+v.onOrder;
+    return `<tr>
+      <td><b>${esc(v.frame)} ${esc(v.size)}</b> <span class="small">${matTxt(v.mat)}</span></td>
+      <td class="n">${v.raw||'—'}</td>
+      <td class="n">${v.coated||'—'}</td>
+      <td class="n">${v.packed||'—'}</td>
+      <td class="n">${v.onOrder||'—'}</td>
+      <td class="n"><b>${total}</b></td>
+      <td class="n small">${v.drr>0?fmt1(v.drr):'—'}</td>
+    </tr>`;
+  }).join('');
+  $('#p-stock').innerHTML=`
+    <div class="ph">Everything the planner is counting right now — pulled live from DispatchLens, per frame variant. Totals across all frames: <b>${T.raw}</b> raw · <b>${T.co}</b> coated · <b>${T.pk}</b> packed · <b>${T.oo}</b> on order.</div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>Frame</th><th class="n">Raw</th><th class="n">Coated</th><th class="n">Packed</th><th class="n">On order</th><th class="n">Total</th><th class="n">Sold/day</th>
+    </tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--ink)"><td><b>All frames</b></td><td class="n"><b>${T.raw}</b></td><td class="n"><b>${T.co}</b></td><td class="n"><b>${T.pk}</b></td><td class="n"><b>${T.oo}</b></td><td class="n"><b>${T.raw+T.co+T.pk+T.oo}</b></td><td class="n"></td></tr></tfoot>
+    </table></div>
+    <div class="ph" style="border-top:1px solid var(--line);border-bottom:none">Raw = frames inwarded (shipments + opening stock) minus pieces sent to coating. Coated & packed come straight from live piece and unit counts. Anything the planner couldn’t match to a frame is in the Health tab, not counted here.</div>`;
+}
 function renderSuggest(){
   const byMfr={};for(const r of M.recs)(byMfr[r.mfr]=byMfr[r.mfr]||[]).push(r);
   $('#p-suggest').innerHTML=`<div class="ph">Suggestions — already counting packed + coated + raw + on-order. <b>Accept</b> puts it into the manufacturer's queue and on the calendar.</div>`+
